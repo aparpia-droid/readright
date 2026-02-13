@@ -1,23 +1,40 @@
+import os
+import re
+from typing import List
+
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List
 from pypdf import PdfReader
 import textstat
-import re
 
 app = FastAPI()
 
-# --- CORS FIX ---
+# ----------------------------
+# CORS
+# ----------------------------
+# Local dev origin + optional deployed frontend origin
+FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN")  # e.g. https://your-frontend.vercel.app
+
+allowed_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+if FRONTEND_ORIGIN:
+    allowed_origins.append(FRONTEND_ORIGIN)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
+    allow_origins=allowed_origins,
+    allow_credentials=False,  # keep False unless you truly need cookies/auth
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- Response Model ---
+# ----------------------------
+# Models
+# ----------------------------
 class RiskSentence(BaseModel):
     sentence: str
     score: int
@@ -27,7 +44,9 @@ class AnalyzeResponse(BaseModel):
     reading_time_minutes: float
     top_risk_sentences: List[RiskSentence]
 
-# --- Risk scoring logic ---
+# ----------------------------
+# Helpers
+# ----------------------------
 def score_sentence(sentence: str) -> int:
     score = 0
 
@@ -35,15 +54,15 @@ def score_sentence(sentence: str) -> int:
     if len(sentence.split()) > 25:
         score += 2
 
-    # Legal / complex language indicators
     complex_terms = [
         "shall", "hereby", "pursuant", "liable",
         "terminate", "whereas", "thereof",
-        "notwithstanding", "civil code", "hud"
+        "notwithstanding", "civil code", "hud",
     ]
 
+    lower = sentence.lower()
     for term in complex_terms:
-        if term.lower() in sentence.lower():
+        if term in lower:
             score += 2
 
     # Numbers increase cognitive load
@@ -52,26 +71,40 @@ def score_sentence(sentence: str) -> int:
 
     return score
 
-# --- Main endpoint ---
+def estimate_reading_time_minutes(text: str, wpm: int = 200) -> float:
+    words = len(re.findall(r"\w+", text))
+    if words == 0:
+        return 0.0
+    return round(words / wpm, 2)
+
+# ----------------------------
+# Routes
+# ----------------------------
+@app.get("/health")
+def health():
+    return {"ok": True}
+
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_pdf(file: UploadFile = File(...)):
     reader = PdfReader(file.file)
 
-    full_text = ""
+    full_text_parts = []
     for page in reader.pages:
-        text = page.extract_text()
-        if text:
-            full_text += text + "\n"
+        t = page.extract_text()
+        if t:
+            full_text_parts.append(t)
 
-    if not full_text.strip():
+    full_text = "\n".join(full_text_parts).strip()
+
+    if not full_text:
         return {
-            "grade_level": 0,
-            "reading_time_minutes": 0,
-            "top_risk_sentences": []
+            "grade_level": 0.0,
+            "reading_time_minutes": 0.0,
+            "top_risk_sentences": [],
         }
 
     grade_level = round(textstat.flesch_kincaid_grade(full_text), 2)
-    reading_time = round(textstat.reading_time(full_text, ms_per_char=14.69) / 60, 2)
+    reading_time = estimate_reading_time_minutes(full_text)
 
     sentences = re.split(r'(?<=[.!?])\s+', full_text)
     scored = []
@@ -88,5 +121,13 @@ async def analyze_pdf(file: UploadFile = File(...)):
     return {
         "grade_level": grade_level,
         "reading_time_minutes": reading_time,
-        "top_risk_sentences": scored
+        "top_risk_sentences": scored,
     }
+
+# ----------------------------
+# Local run (optional)
+# ----------------------------
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
