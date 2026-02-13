@@ -14,14 +14,14 @@ app = FastAPI()
 # -------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # allow all for now (safe for MVP backend-only stage)
+    allow_origins=["*"],  # MVP: allow all. Lock down after frontend deploy.
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # -------------------------
-# Health Check Route
+# Root + Health (Render-friendly)
 # -------------------------
 @app.get("/")
 def root():
@@ -31,7 +31,6 @@ def root():
 def health():
     return {"status": "ok"}
 
-
 # -------------------------
 # Response Models
 # -------------------------
@@ -39,12 +38,22 @@ class RiskSentence(BaseModel):
     sentence: str
     score: int
 
-
 class AnalyzeResponse(BaseModel):
     grade_level: float
     reading_time_minutes: float
     top_risk_sentences: List[RiskSentence]
 
+# -------------------------
+# Text Cleanup Helpers
+# -------------------------
+def normalize_pdf_text(text: str) -> str:
+    """
+    PDFs often insert hard line breaks mid-sentence.
+    This turns all whitespace into single spaces so sentence splitting works.
+    """
+    # Replace any whitespace (newlines, tabs) with spaces
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 # -------------------------
 # Risk Scoring Logic
@@ -52,8 +61,10 @@ class AnalyzeResponse(BaseModel):
 def score_sentence(sentence: str) -> int:
     score = 0
 
+    words = sentence.split()
+
     # Long sentence penalty
-    if len(sentence.split()) > 25:
+    if len(words) > 25:
         score += 2
 
     complex_terms = [
@@ -62,16 +73,20 @@ def score_sentence(sentence: str) -> int:
         "notwithstanding", "civil code", "hud"
     ]
 
+    lower = sentence.lower()
     for term in complex_terms:
-        if term.lower() in sentence.lower():
+        if term in lower:
             score += 2
 
     # Numbers increase cognitive load
     if re.search(r"\d", sentence):
         score += 1
 
-    return score
+    # Conditional complexity
+    if " if " in f" {lower} " or " unless " in f" {lower} ":
+        score += 1
 
+    return score
 
 # -------------------------
 # Main Analyze Endpoint
@@ -80,11 +95,13 @@ def score_sentence(sentence: str) -> int:
 async def analyze_pdf(file: UploadFile = File(...)):
     reader = PdfReader(file.file)
 
-    full_text = ""
+    parts = []
     for page in reader.pages:
-        text = page.extract_text()
-        if text:
-            full_text += text + "\n"
+        t = page.extract_text()
+        if t:
+            parts.append(t)
+
+    full_text = "\n".join(parts)
 
     if not full_text.strip():
         return {
@@ -93,33 +110,37 @@ async def analyze_pdf(file: UploadFile = File(...)):
             "top_risk_sentences": []
         }
 
-    grade_level = round(textstat.flesch_kincaid_grade(full_text), 2)
-    reading_time = round(
-        textstat.reading_time(full_text, ms_per_char=14.69) / 60,
-        2
-    )
+    # Normalize whitespace so sentences aren't chopped by PDF line breaks
+    clean_text = normalize_pdf_text(full_text)
 
-    sentences = re.split(r'(?<=[.!?])\s+', full_text)
+    # Readability + time
+    grade_level = round(textstat.flesch_kincaid_grade(clean_text), 2)
+
+    # textstat.reading_time returns seconds; we convert to minutes
+    reading_time_minutes = round(textstat.reading_time(clean_text) / 60, 2)
+
+    # Sentence splitting (works better after normalization)
+    sentences = re.split(r'(?<=[.!?])\s+', clean_text)
+
     scored = []
-
     for s in sentences:
-        clean = s.strip()
-        if len(clean) > 40:
-            risk = score_sentence(clean)
-            if risk > 0:
-                scored.append({
-                    "sentence": clean,
-                    "score": risk
-                })
+        s_clean = s.strip()
+
+        # Skip tiny fragments
+        if len(s_clean) < 40:
+            continue
+
+        risk = score_sentence(s_clean)
+        if risk > 0:
+            scored.append({"sentence": s_clean, "score": risk})
 
     scored = sorted(scored, key=lambda x: x["score"], reverse=True)[:5]
 
     return {
         "grade_level": grade_level,
-        "reading_time_minutes": reading_time,
+        "reading_time_minutes": reading_time_minutes,
         "top_risk_sentences": scored
     }
-
 
 # -------------------------
 # Local Run Support
