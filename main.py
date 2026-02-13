@@ -10,18 +10,18 @@ import os
 app = FastAPI()
 
 # -------------------------
-# CORS Configuration
+# CORS
 # -------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # MVP: allow all. Lock down after frontend deploy.
+    allow_origins=["*"],  # tighten later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # -------------------------
-# Root + Health (Render-friendly)
+# Health Routes
 # -------------------------
 @app.get("/")
 def root():
@@ -32,38 +32,31 @@ def health():
     return {"status": "ok"}
 
 # -------------------------
-# Response Models
+# Models
 # -------------------------
-class RiskSentence(BaseModel):
+class SentenceScore(BaseModel):
     sentence: str
     score: int
 
 class AnalyzeResponse(BaseModel):
     grade_level: float
     reading_time_minutes: float
-    top_risk_sentences: List[RiskSentence]
+    total_sentences: int
+    average_risk_score: float
+    all_sentences: List[SentenceScore]
+    top_risk_sentences: List[SentenceScore]
 
 # -------------------------
-# Text Cleanup Helpers
+# Helpers
 # -------------------------
 def normalize_pdf_text(text: str) -> str:
-    """
-    PDFs often insert hard line breaks mid-sentence.
-    This turns all whitespace into single spaces so sentence splitting works.
-    """
-    # Replace any whitespace (newlines, tabs) with spaces
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
-# -------------------------
-# Risk Scoring Logic
-# -------------------------
 def score_sentence(sentence: str) -> int:
     score = 0
-
     words = sentence.split()
 
-    # Long sentence penalty
     if len(words) > 25:
         score += 2
 
@@ -78,18 +71,16 @@ def score_sentence(sentence: str) -> int:
         if term in lower:
             score += 2
 
-    # Numbers increase cognitive load
     if re.search(r"\d", sentence):
         score += 1
 
-    # Conditional complexity
     if " if " in f" {lower} " or " unless " in f" {lower} ":
         score += 1
 
     return score
 
 # -------------------------
-# Main Analyze Endpoint
+# Main Endpoint
 # -------------------------
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_pdf(file: UploadFile = File(...)):
@@ -107,43 +98,51 @@ async def analyze_pdf(file: UploadFile = File(...)):
         return {
             "grade_level": 0,
             "reading_time_minutes": 0,
+            "total_sentences": 0,
+            "average_risk_score": 0,
+            "all_sentences": [],
             "top_risk_sentences": []
         }
 
-    # Normalize whitespace so sentences aren't chopped by PDF line breaks
     clean_text = normalize_pdf_text(full_text)
 
-    # Readability + time
     grade_level = round(textstat.flesch_kincaid_grade(clean_text), 2)
-
-    # textstat.reading_time returns seconds; we convert to minutes
     reading_time_minutes = round(textstat.reading_time(clean_text) / 60, 2)
 
-    # Sentence splitting (works better after normalization)
     sentences = re.split(r'(?<=[.!?])\s+', clean_text)
 
-    scored = []
+    all_scored = []
+    total_score = 0
+
     for s in sentences:
         s_clean = s.strip()
-
-        # Skip tiny fragments
-        if len(s_clean) < 40:
+        if len(s_clean) < 30:
             continue
 
         risk = score_sentence(s_clean)
-        if risk > 0:
-            scored.append({"sentence": s_clean, "score": risk})
+        total_score += risk
+        all_scored.append({"sentence": s_clean, "score": risk})
 
-    scored = sorted(scored, key=lambda x: x["score"], reverse=True)[:5]
+    total_sentences = len(all_scored)
+    average_risk_score = round(total_score / total_sentences, 2) if total_sentences > 0 else 0
+
+    top_risk_sentences = sorted(
+        all_scored,
+        key=lambda x: x["score"],
+        reverse=True
+    )[:5]
 
     return {
         "grade_level": grade_level,
         "reading_time_minutes": reading_time_minutes,
-        "top_risk_sentences": scored
+        "total_sentences": total_sentences,
+        "average_risk_score": average_risk_score,
+        "all_sentences": all_scored,
+        "top_risk_sentences": top_risk_sentences
     }
 
 # -------------------------
-# Local Run Support
+# Local Run
 # -------------------------
 if __name__ == "__main__":
     import uvicorn
