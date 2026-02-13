@@ -9,51 +9,53 @@ import os
 
 app = FastAPI()
 
-# ---------------------------
-# CORS
-# ---------------------------
+# -------------------------
+# CORS Configuration
+# -------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # safe for now; lock down later
+    allow_origins=["*"],  # allow all for now (safe for MVP backend-only stage)
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ---------------------------
-# Health + Root Endpoints
-# ---------------------------
+# -------------------------
+# Health Check Route
+# -------------------------
 @app.get("/")
 def root():
     return {"status": "ReadRight backend running"}
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"status": "ok"}
 
-# ---------------------------
+
+# -------------------------
 # Response Models
-# ---------------------------
+# -------------------------
 class RiskSentence(BaseModel):
     sentence: str
     score: int
+
 
 class AnalyzeResponse(BaseModel):
     grade_level: float
     reading_time_minutes: float
     top_risk_sentences: List[RiskSentence]
 
-# ---------------------------
+
+# -------------------------
 # Risk Scoring Logic
-# ---------------------------
+# -------------------------
 def score_sentence(sentence: str) -> int:
     score = 0
 
-    # Length penalty
+    # Long sentence penalty
     if len(sentence.split()) > 25:
         score += 2
 
-    # Legal / complex language indicators
     complex_terms = [
         "shall", "hereby", "pursuant", "liable",
         "terminate", "whereas", "thereof",
@@ -70,9 +72,10 @@ def score_sentence(sentence: str) -> int:
 
     return score
 
-# ---------------------------
+
+# -------------------------
 # Main Analyze Endpoint
-# ---------------------------
+# -------------------------
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_pdf(file: UploadFile = File(...)):
     reader = PdfReader(file.file)
@@ -84,11 +87,11 @@ async def analyze_pdf(file: UploadFile = File(...)):
             full_text += text + "\n"
 
     if not full_text.strip():
-        return AnalyzeResponse(
-            grade_level=0,
-            reading_time_minutes=0,
-            top_risk_sentences=[]
-        )
+        return {
+            "grade_level": 0,
+            "reading_time_minutes": 0,
+            "top_risk_sentences": []
+        }
 
     grade_level = round(textstat.flesch_kincaid_grade(full_text), 2)
     reading_time = round(
@@ -104,22 +107,24 @@ async def analyze_pdf(file: UploadFile = File(...)):
         if len(clean) > 40:
             risk = score_sentence(clean)
             if risk > 0:
-                scored.append(
-                    RiskSentence(sentence=clean, score=risk)
-                )
+                scored.append({
+                    "sentence": clean,
+                    "score": risk
+                })
 
-    scored = sorted(scored, key=lambda x: x.score, reverse=True)[:5]
+    scored = sorted(scored, key=lambda x: x["score"], reverse=True)[:5]
 
-    return AnalyzeResponse(
-        grade_level=grade_level,
-        reading_time_minutes=reading_time,
-        top_risk_sentences=scored
-    )
+    return {
+        "grade_level": grade_level,
+        "reading_time_minutes": reading_time,
+        "top_risk_sentences": scored
+    }
 
-# ---------------------------
-# Local Run (for development)
-# ---------------------------
+
+# -------------------------
+# Local Run Support
+# -------------------------
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
