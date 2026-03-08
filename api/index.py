@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from pypdf import PdfReader
 import textstat
 
-from openai import OpenAI
+from groq import Groq
 
 
 app = FastAPI(title="ReadRight API", version="1.0.0")
@@ -210,17 +210,17 @@ async def analyze_pdf(file: UploadFile = File(...)):
 
 @app.post("/api/rewrite", response_model=RewriteResponse)
 async def rewrite_sentence(request: RewriteRequest):
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         # Return a clear error string the frontend can show
         # (Still uses the RewriteResponse schema by providing "rewritten".)
-        return {"rewritten": "ERROR: OPENAI_API_KEY not set on the server."}
+        return {"rewritten": "ERROR: GROQ_API_KEY not set on the server."}
 
-    client = OpenAI(api_key=api_key)
+    client = Groq(api_key=api_key)
 
     try:
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="llama-3.1-8b-instant",
             messages=[
                 {
                     "role": "system",

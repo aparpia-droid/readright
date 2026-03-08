@@ -6,7 +6,7 @@ This project is a full-stack Next.js application that leverages a Python (FastAP
 
 ## Architecture
 - **Frontend**: Next.js 15 (App Router), React 19, TailwindCSS, Framer Motion
-- **Backend**: Python 3.9+, FastAPI, pypdf, OpenAI
+- **Backend**: Python 3.9+, FastAPI, pypdf, Groq
 - **Deployment**: Vercel Serverless (Next.js handling UI, `/api` routing to Python)
 
 ## How to Run Locally
@@ -19,7 +19,7 @@ source venv/bin/activate
 pip install -r api/requirements.txt
 uvicorn api.index:app --reload --port 8000
 ```
-*(Make sure you have an `OPENAI_API_KEY` exported in your environment or set in `.env` for the Rewrite capability to work).*
+*(Make sure you have an `GROQ_API_KEY` exported in your environment or set in `.env` for the Rewrite capability to work).*
 
 ### 2. Start the Next.js Frontend
 In a new terminal window, start the Next.js development server:
@@ -39,11 +39,11 @@ Deployment to Vercel is basically a one-click process.
    - **Framework Preset**: Next.js
    - **Root Directory**: `./` (Default)
    - **Build Command**: `npm run build` (Default)
-   - **Environment Variables**: Add your `OPENAI_API_KEY`.
+   - **Environment Variables**: Add your `GROQ_API_KEY`.
 4. **Deploy:** Click "Deploy".
    - Vercel will automatically build the Next.js frontend and detect the `api/` folder and `vercel.json` to handle the FastAPI python routing without needing any extra configuration.
 
 ## Features
 - **Premium Design:** Glassmorphism, animations, gradients, and dynamic drag-and-drop.
 - **Risk Hotspot Highlighting:** AI-driven text assessment utilizing complex sentence flagging.
-- **Plain English Translations:** Connects to OpenAI to rewrite complex legal clauses intuitively.
+- **Plain English Translations:** Connects to Groq's fast and free Llama 3 API to rewrite complex legal clauses intuitively.
