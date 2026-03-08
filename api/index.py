@@ -140,17 +140,17 @@ def score_sentence(sentence: str) -> int:
 # ---------------------------
 # Routes
 # ---------------------------
-@app.get("/")
+@app.get("/api")
 def root():
     return {"status": "ReadRight backend running"}
 
 
-@app.get("/health")
+@app.get("/api/health")
 def health():
     return {"status": "ok"}
 
 
-@app.post("/analyze", response_model=AnalyzeResponse)
+@app.post("/api/analyze", response_model=AnalyzeResponse)
 async def analyze_pdf(file: UploadFile = File(...)):
     reader = PdfReader(file.file)
 
@@ -208,7 +208,7 @@ async def analyze_pdf(file: UploadFile = File(...)):
     }
 
 
-@app.post("/rewrite", response_model=RewriteResponse)
+@app.post("/api/rewrite", response_model=RewriteResponse)
 async def rewrite_sentence(request: RewriteRequest):
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
